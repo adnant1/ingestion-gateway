@@ -29,7 +29,18 @@ class IngestionQueue:
 
         for record in records:
             await self.queue.put(record)
+    
+    async def dequeue(self) -> dict:
+        '''
+        Remove and return a single record from the queue.
 
+        Semantics:
+        - Blocks until a record is available
+        - Safe for background consumers
+        '''
+
+        return await self.queue.get()
+        
     def size(self) -> int:
         '''
         Current number of records in the queue.
