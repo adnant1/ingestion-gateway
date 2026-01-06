@@ -1,31 +1,20 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from app.models import IngestRequest, IngestResponse
-from pipeline.queue import IngestionQueue, QueueFullError
+from pipeline.queue import QueueFullError
 
 router = APIRouter()
-ingestion_queue = IngestionQueue(max_size=1000)
-
-async def accept_records(records: list[dict]) -> None:
-    '''
-    Acceptance boundary for ingestion pipeline.
-
-    Responsibilities:
-    - Enforce backpressure
-    - Enqueue records into bounded queue
-    '''
-
-    await ingestion_queue.enqueue(records)
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(request: IngestRequest) -> IngestResponse:
+async def ingest(request: Request, body: IngestRequest) -> IngestResponse:
     '''
     Accepts raw JSON records and forwards them into the ingestion pipeline.
     '''
 
-    records = request.records()
+    ingestion_queue = request.app.state.ingestion_queue
+    records = body.records()
 
     try:
-        await accept_records(records)
+        await ingestion_queue.enqueue(records)
     except QueueFullError:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
