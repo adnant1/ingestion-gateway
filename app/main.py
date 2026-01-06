@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api import router
 from pipeline.queue import IngestionQueue
 from pipeline.batch_worker import BatchWorker
+from sinks.base import Sink
 from sinks.terminal import TerminalSink
 from sinks.file import FileSink
 
@@ -29,10 +30,66 @@ def build_sink():
     else:
         raise ValueError(f'unknown sink type: {sink_type}. Valid options: terminal, file')
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    '''
+    Application lifecycle manager.
+
+    Startup:
+    - Build core components
+    - Start background workers
+
+    Shutdown:
+    - Signal background workers to stop
+    - Flush pending data
+    - Wait for clean exit
+    '''
+
+    # Startup
+    stop_event = asyncio.Event()
+
+    sink: Sink = build_sink()
+    ingestion_queue = IngestionQueue(max_size=1000)
+    batch_worker = BatchWorker(
+        queue=ingestion_queue,
+        batch_size=100,
+        flush_interval=5.0,
+        sink=sink
+    )
+
+    worker_task = asyncio.create_task(batch_worker.run(stop_event))
+
+    app.state.stop_event = stop_event
+    app.state.ingestion_queue = ingestion_queue
+    app.state.batch_worker = batch_worker
+    app.state.worker_task = worker_task
+
+    # Uvicorn already triggers FastAPI shutdown on SIGTERM/SIGINT, but
+    # we also want to notify our worker to stop.
+
+    loop = asyncio.get_running_loop()
+    def _handle_shutdown():
+        loop.call_soon_threadsafe(stop_event.set)
+    
+    signal.signal(signal.SIGTERM, lambda s, f: _handle_shutdown())
+    signal.signal(signal.SIGINT, lambda s, f: _handle_shutdown())
+
+    yield
+
+    # Shutdown
+    stop_event.set()
+    await batch_worker.flush_now()
+
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
     title="multi-storage ingestion gateway",
     description="async ingestion gateway for multiple storage backends",
+    lifespan=lifespan
 )
 
 app.include_router(router)
