@@ -1,6 +1,5 @@
 import asyncio
 import os
-import signal
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -85,16 +84,6 @@ async def lifespan(app: FastAPI):
     app.state.ingestion_queue = ingestion_queue
     app.state.batch_worker = batch_worker
     app.state.worker_task = worker_task
-
-    # Uvicorn already triggers FastAPI shutdown on SIGTERM/SIGINT, but
-    # we also want to notify our worker to stop.
-
-    loop = asyncio.get_running_loop()
-    def _handle_shutdown():
-        loop.call_soon_threadsafe(stop_event.set)
-    
-    signal.signal(signal.SIGTERM, lambda s, f: _handle_shutdown())
-    signal.signal(signal.SIGINT, lambda s, f: _handle_shutdown())
 
     yield
 
