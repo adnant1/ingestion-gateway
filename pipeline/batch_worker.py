@@ -29,7 +29,7 @@ class BatchWorker:
         # Internal state
         self.current_batch: List[dict] = []
     
-    async def run(self) -> None:
+    async def run(self, stop_event: asyncio.Event) -> None:
         '''
         Main worker loop.
 
@@ -37,7 +37,7 @@ class BatchWorker:
         '''
 
         last_flush = asyncio.get_event_loop().time()
-        while True:
+        while not stop_event.is_set():
             try:
                 record = await asyncio.wait_for(
                     self.queue.dequeue(),
@@ -56,6 +56,18 @@ class BatchWorker:
                     if self.current_batch:
                         await self._flush()
                     last_flush = current_time
+            except asyncio.CancelledError:
+                await self.flush_now()
+                raise
+                
+        await self.flush_now() # Flush remaining records on stop
+    
+    async def flush_now(self) -> None:
+        '''
+        Immediately flush the current batch.
+        '''
+
+        await self._flush()
 
     async def _flush(self) -> None:
         '''
