@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 from fastapi import FastAPI
 
@@ -12,6 +13,8 @@ from pipeline.retry import RetryPolicy
 from sinks.base import Sink
 from sinks.terminal import TerminalSink
 from sinks.file import FileSink
+
+load_dotenv()
 
 def build_sink() -> Sink:
     '''
