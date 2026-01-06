@@ -1,5 +1,6 @@
 import asyncio
 from typing import List
+from pipeline.errors import DeliveryError
 from pipeline.queue import IngestionQueue
 from sinks.base import Sink
 
@@ -19,12 +20,16 @@ class BatchWorker:
             queue: IngestionQueue,
             batch_size: int,
             flush_interval: float,
-            sink: Sink
+            sink: Sink,
+            dlq_sink: Sink,
+            retry_policy,
     ):
         self.queue = queue
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self.sink = sink
+        self.dlq_sink = dlq_sink
+        self.retry_policy = retry_policy
 
         # Internal state
         self.current_batch: List[dict] = []
@@ -82,6 +87,14 @@ class BatchWorker:
         if not self.current_batch:
             return
         
-        batch = self.current_batch
-        self.current_batch = []
-        await self.sink.write_batch(batch)
+        batch = list(self.current_batch)
+
+        try:
+            await self.retry_policy.execute(
+                lambda: self.sink.write_batch(batch)
+            )
+
+            self.current_batch.clear()
+        except DeliveryError:
+            await self.dlq_sink.write_batch(batch)
+            self.current_batch.clear()
