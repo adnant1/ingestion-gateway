@@ -1,6 +1,7 @@
 import asyncio
 from typing import List
 from pipeline.queue import IngestionQueue
+from sinks.base import Sink
 
 class BatchWorker:
     '''
@@ -17,11 +18,13 @@ class BatchWorker:
             self,
             queue: IngestionQueue,
             batch_size: int,
-            flush_interval: float
+            flush_interval: float,
+            sink: Sink
     ):
         self.queue = queue
         self.batch_size = batch_size
         self.flush_interval = flush_interval
+        self.sink = sink
 
         # Internal state
         self.current_batch: List[dict] = []
@@ -55,4 +58,18 @@ class BatchWorker:
                     last_flush = current_time
 
     async def _flush(self) -> None:
-        pass
+        '''
+        Deliver the current batch to the sink.
+
+        Semantics:
+        - No-op if batch is empty
+        - Sink is called with a full batch
+        - Batch is cleared only after successful write
+        '''
+
+        if not self.current_batch:
+            return
+        
+        batch = self.current_batch
+        self.current_batch = []
+        await self.sink.write_batch(batch)
