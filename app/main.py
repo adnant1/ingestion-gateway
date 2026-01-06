@@ -8,11 +8,12 @@ from fastapi import FastAPI
 from app.api import router
 from pipeline.queue import IngestionQueue
 from pipeline.batch_worker import BatchWorker
+from pipeline.retry import RetryPolicy
 from sinks.base import Sink
 from sinks.terminal import TerminalSink
 from sinks.file import FileSink
 
-def build_sink():
+def build_sink() -> Sink:
     '''
     Create the sink from environment configuration.
     '''
@@ -29,6 +30,17 @@ def build_sink():
         return FileSink(path=path)
     else:
         raise ValueError(f'unknown sink type: {sink_type}. Valid options: terminal, file')
+    
+def build_dql_sink() -> Sink:
+    '''
+    Create the DLQ sink from environment configuration.
+    '''
+
+    dlq_path = os.getenv('DLQ_PATH')
+    if not dlq_path:
+        raise ValueError('DLQ_PATH environment variable must be set for DLQ sink')
+
+    return FileSink(path=dlq_path)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,12 +61,19 @@ async def lifespan(app: FastAPI):
     stop_event = asyncio.Event()
 
     sink: Sink = build_sink()
+    dlq_sink: Sink = build_dql_sink()
     ingestion_queue = IngestionQueue(max_size=1000)
+    retry_policy = RetryPolicy(
+        max_attempts=3,
+        base_delay=0.5
+    )
     batch_worker = BatchWorker(
         queue=ingestion_queue,
         batch_size=100,
         flush_interval=5.0,
-        sink=sink
+        sink=sink,
+        dlq_sink=dlq_sink,
+        retry_policy=retry_policy
     )
 
     worker_task = asyncio.create_task(batch_worker.run(stop_event))
