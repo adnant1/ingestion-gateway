@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
     stop_event.set()
     await batch_worker.flush_now()
 
+    worker_task.cancel()
+
     try:
         await worker_task
     except asyncio.CancelledError:
